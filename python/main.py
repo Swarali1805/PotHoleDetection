@@ -15,11 +15,12 @@ from pothole_detection.tracker import PotholeTracker
 LIVE_MODE = True  # Set to True to use ESP32 devices, False for video file
 
 # IMPORTANT: UPDATE THESE IP ADDRESSES TO MATCH YOUR ESP32 DEVICES
-# After uploading firmware, check Serial Monitor to get the correct IP addresses
-# Both ESP32 devices must be on the same WiFi network as this computer
-# NOTE: Ensure these IP addresses match what is shown in the Serial Monitor!
+# After uploading firmware, check the Arduino Serial Monitor (115200 baud) 
+# to get the correct IP addresses for both devices.
+# Both ESP32 devices must be on the same WiFi network as this computer.
 
-# DUAL ESP32 ARCHITECTURE
+# DUAL ESP32 ARCHITECTURE CONFIGURATION
+# [USER ACTION REQUIRED]: Update these IPs!
 ESP32_CAM_IP = "192.168.137.100"      # <--- ESP32-CAM Vision Node IP (Port 81)
 ESP32_SENSOR_IP = "192.168.137.101"   # <--- ESP32 Sensor Node IP (Port 80)
 

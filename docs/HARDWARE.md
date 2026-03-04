@@ -1,474 +1,198 @@
-# Dual ESP32 Wiring Guide
-## ESP32-CAM Vision Node + ESP32 Sensor Node
+# Hardware Documentation: PotHole Detection System
 
-**Architecture:** Dual ESP32 (v2.0)  
-**Last Updated:** 2026-02-10
+## 1. Hardware Overview
 
----
+The PotHole Detection System is a vehicle-mounted embedded hardware unit designed to autonomously identify, record, and map road surface anomalies (potholes). The system achieves this by fusing vision-based detection and inertial measurement data, geolocating these events in real-time.
 
-## CRITICAL NOTES
+Embedded hardware is essential for this application due to the constraints of the operating environment: it requires real-time deterministic processing, low power consumption for battery operation, compact form factor for vehicle mounting, and robust interfaces for various sensors. 
 
-1. **Dual ESP32 Architecture:**
-   - **ESP32-CAM Vision Node:** Camera streaming only (no sensors)
-   - **ESP32 Sensor Node:** MPU6050 + GPS + RTC (no camera)
-
-2. **I2C Address Conflict (Sensor Node Only):**
-   - MPU6050 and DS3231 both use address `0x68` by default
-   - **SOLUTION:** Connect MPU6050's AD0 pin to 3.3V (changes address to `0x69`)
-   - **CRITICAL:** This is mandatory for both sensors to work!
-
-3. **Pull-Up Resistors Required:** I2C bus needs 4.7kΩ pull-ups on SDA and SCL
-
-4. **Power Requirements:**
-   - ESP32-CAM: **5V 2A** (camera needs high current)
-   - ESP32 Sensor Node: **5V 1A** (sensors use less power)
-
-5. **Common Ground:** All components MUST share common ground
-
-6. **WiFi Network:** Both ESP32 devices must connect to the same WiFi network
+The core of the system is the ESP32-CAM, which acts as the central processing unit (CPU). It orchestrates the capture of visual data from its onboard OV2640 camera and reads continuous acceleration and gyroscopic data from the MPU6050 accelerometer via the I2C bus. When a pothole is detected (either through sudden vertical acceleration spikes or visual classification), the system queries the NEO-6M GPS module via UART for current spatial coordinates. The DS3231 RTC module provides highly accurate timestamps for data logging. A Li-ion power unit securely provides the necessary regulated voltage to all modules.
 
 ---
 
-## Components List
+## 2. Hardware Components
 
-| Component | Quantity | Notes |
-|-----------|----------|-------|
-| ESP32-CAM (AI Thinker) | 1 | Vision Node - camera streaming |
-| ESP32 DevKit | 1 | Sensor Node - MPU6050 + GPS + RTC |
-| MPU6050 | 1 | 6-axis accelerometer/gyroscope |
-| DS3231 RTC | 1 | Real-time clock module |
-| GPS Module (NEO-6M) | 1 | UART GPS with TX/RX |
-| 4.7kΩ Resistors | 2 | I2C pull-ups (can use 2.2kΩ - 10kΩ) |
-| Jumper Wires | Multiple | For connections |
-| 5V Power Supply | 2 | 2A for ESP32-CAM, 1A for Sensor Node |
-| Breadboard | 1-2 | Optional, for prototyping |
+### ESP32-CAM (with OV2640 Camera Module)
+* **What it is:** A small-size, low-power camera module based on the ESP32 chip. It features Wi-Fi, Bluetooth, and an onboard MicroSD card slot.
+* **Why it was selected:** It provides both relatively high-performance processing capabilities for edge analytics (dual-core 32-bit LX6 microprocessor) and visual data capture in a single, cost-effective package.
+* **Key features:** 240MHz clock speed, onboard OV2640 2-megapixel camera, MicroSD slot for data logging, integrated Wi-Fi/BLE.
+* **Working principle:** The ESP32 processes sensor inputs iteratively. It utilizes Direct Memory Access (DMA) for fast camera frame-grabbing and manages peripheral communication through its versatile GPIO pins.
+* **Role in the project:** Serves as the master microcontroller, processing vibration data, capturing images of suspected potholes, and managing system logic and logging.
 
----
+### MPU6050 Accelerometer and Gyroscope
+* **What it is:** A 6-axis MotionTracking device that combines a 3-axis gyroscope and a 3-axis accelerometer.
+* **Why it was selected:** High precision, embedded Digital Motion Processor (DMP™), and standard I2C interface make it ideal for detecting sudden shocks and vibrations characteristic of traversing potholes.
+* **Key features:** User-programmable digital filters, 16-bit analog-to-digital converters (ADCs), low power consumption.
+* **Working principle:** Measures proper acceleration and angular velocity using Micro-Electro-Mechanical Systems (MEMS) technology. It outputs raw sensor values over the I2C bus.
+* **Role in the project:** Acts as the primary physical trigger. Sudden spikes in the Z-axis acceleration indicate a vertical displacement (pothole), prompting the system to log the event and trigger the camera.
 
-## Pin Assignments
+### NEO-6M GPS Module
+* **What it is:** A standalone GPS receiver featuring the high-performance u-blox 6 positioning engine.
+* **Why it was selected:** Provides reliable and accurate geospatial positioning required for mapping the exact locations of detected potholes.
+* **Key features:** 50-channel u-blox 6 engine, Time-To-First-Fix (TTFF) of under 1 second, UART interface, high sensitivity.
+* **Working principle:** Receives signals from multiple GPS satellites to triangulate the device's exact latitude, longitude, and altitude. Outputs NMEA sentences via serial communication.
+* **Role in the project:** Supplies real-time geographic coordinates which are appended to the logged pothole events for later GIS mapping.
 
-### ESP32-CAM Vision Node (Camera Only)
+### DS3231 RTC Module
+* **What it is:** A low-cost, extremely accurate I2C real-time clock (RTC) with an integrated temperature-compensated crystal oscillator (TCXO) and crystal.
+* **Why it was selected:** ESP32's internal timekeeping loses accuracy when powered off or without internet NTP sync. The DS3231 ensures highly accurate timestamps for local logging, regardless of network connectivity.
+* **Key features:** Battery backup input for continuous timekeeping, highly accurate TCXO, standard I2C interface.
+* **Working principle:** Maintains accurate time internally and responds to I2C register reads with current time and date data.
+* **Role in the project:** Timestamps every pothole detection event, ensuring chronological integrity of the logged data.
 
-| Function | ESP32-CAM GPIO | Connected To |
-|----------|----------------|--------------|
-| Camera | GPIO 0,1,3,5,14,15,16 + others | OV2640 Camera (built-in) |
-| 5V | 5V pin | Power supply positive |
-| GND | GND | Power supply negative |
-| **No sensors connected** | - | All sensors on separate ESP32 |
-
-### ESP32 Sensor Node (Sensors Only)
-
-| Function | ESP32 GPIO | Connected To |
-|----------|------------|--------------|
-| I2C SDA | GPIO 21 | MPU6050 SDA + RTC SDA + Pull-up |
-| I2C SCL | GPIO 22 | MPU6050 SCL + RTC SCL + Pull-up |
-| GPS RX | GPIO 16 (RX2) | GPS TX |
-| GPS TX | GPIO 17 (TX2) | GPS RX |
-| 5V | 5V pin | Power supply positive |
-| 3.3V | 3.3V pin | MPU6050 VCC + Pull-up resistors |
-| GND | GND | Common ground for all modules |
+### Power Supply System
+* **What it is:** A mobile Li-ion battery pack (or power bank) combined with voltage regulation circuitry.
+* **Why it was selected:** The system must be mounted on vehicle exteriors, requiring a detached, stable DC power source.
+* **Key features:** High capacity (mAh) for extended operation, 5V regulated output, over-current protection.
+* **Working principle:** Converts the variable Li-ion battery voltage (e.g., 3.7V - 4.2V) to a stable 5V DC supply, which is then regulated down to 3.3V onboard the ESP32-CAM and other 3.3V logic modules.
+* **Role in the project:** Ensures continuous, clean power to all components, preventing brown-out resets and sensor inaccuracies.
 
 ---
 
-## Component Wiring
+## 3. Hardware Architecture
 
-### Node 1: ESP32-CAM Vision Node
+The embedded architecture follows a centralized processing topology where the ESP32-CAM acts as the master controller node, interfacing with several peripheral subsystems:
 
-#### Power
-```
-Power Supply (5V, 2A)
-├─ Positive (+) ──────→ ESP32-CAM 5V pin
-└─ Negative (-) ──────→ ESP32-CAM GND pin
-```
+**Sensor System (Input):** The MPU6050 operates on the I2C bus. The ESP32-CAM continuously polls the MPU6050 at a high sampling rate to analyze Z-axis acceleration data. The DS3231 RTC also shares this I2C bus, providing temporal context to the processed data.
 
-#### Camera
-```
-OV2640 Camera: Built-in to ESP32-CAM module
-No external wiring needed
-```
+**Location System (Input):** The NEO-6M GPS module operates asynchronously, communicating with the ESP32-CAM over a UART serial interface. The ESP32 parses incoming NMEA sentences to extract current latitude and longitude.
 
-**That's it for Vision Node!** No sensors connected.
+**Camera System (Input/Output):** The OV2640 camera module interfaces directly via the ESP32-CAM's dedicated parallel camera interface (DVP). When a mechanical shock is registered by the Sensor System, the ESP32 triggers a frame capture.
+
+**Processing and Logging Unit (Output):** Upon successful multi-sensor confirmation (vibration + image), the ESP32-CAM aggregates the timestamp from the RTC, the coordinates from the GPS, and saves the image to the integrated MicroSD card (communicating via SDMMC / SPI), along with a telemetry log entry.
+
+The entire circuit is powered from a central 5V rail provided by the external power supply, utilizing localized linear regulators to drop down to the required 3.3V logic levels for specific ICs.
 
 ---
 
-### Node 2: ESP32 Sensor Node
+## 4. Wiring Diagram
 
-#### Power
-```
-Power Supply (5V, 1A)
-├─ Positive (+) ──────→ ESP32 5V pin (or VIN)
-└─ Negative (-) ──────→ ESP32 GND pin
-```
+The following tables define the strict pin-to-pin connections required to assemble the physical circuit.
 
-#### 1. MPU6050 (Accelerometer/Gyroscope)
-```
-MPU6050          ESP32 DevKit
-─────────────────────────────
-VCC    ──────→   3.3V
-GND    ──────→   GND
-SCL    ──────→   GPIO 22 (I2C SCL)
-SDA    ──────→   GPIO 21 (I2C SDA)
-AD0    ──────→   3.3V  CRITICAL: Sets address to 0x69
-INT    ──────→   (Not connected)
-```
+> **Note:** The ESP32-CAM has a limited number of exposed GPIO pins, so I2C pins (GPIO21, GPIO22) must be shared between the MPU6050 and the DS3231 RTC.
 
-**Notes:**
-- MPU6050 operates at **3.3V**
-- **AD0 to 3.3V is MANDATORY** to avoid address conflict with RTC
-- If AD0 is left floating or connected to GND, address will be 0x68 (conflict!)
+### MPU6050 Accelerometer Connections
 
-#### 2. DS3231 RTC (Real-Time Clock)
-```
-DS3231           ESP32 DevKit
-─────────────────────────────
-VCC    ──────→   3.3V (or 5V, module accepts both)
-GND    ──────→   GND
-SCL    ──────→   GPIO 22 (I2C SCL) - shared with MPU6050
-SDA    ──────→   GPIO 21 (I2C SDA) - shared with MPU6050
-32K    ──────→   (Not connected)
-SQW    ──────→   (Not connected)
-```
+| Component | Pin | ESP32-CAM Pin | Purpose |
+| :--- | :--- | :--- | :--- |
+| MPU6050 | VCC | 3.3V or 5V* | Power supply (*Depends on MPU module's onboard regulator) |
+| MPU6050 | GND | GND | Common Ground |
+| MPU6050 | SDA | GPIO 21 | I2C Data line (Shared) |
+| MPU6050 | SCL | GPIO 22 | I2C Clock line (Shared) |
 
-**Notes:**
-- DS3231 has I2C address **0x68** (fixed, cannot change)
-- Most DS3231 modules have **built-in pull-up resistors**
-- Battery backup keeps time when power is off
+### NEO-6M GPS Module Connections
 
-#### 3. GPS Module (NEO-6M)
-```
-GPS Module       ESP32 DevKit
-─────────────────────────────
-VCC    ──────→   3.3V (or 5V, check your module)
-GND    ──────→   GND
-TX     ──────→   GPIO 16 (ESP32 RX2)
-RX     ──────→   GPIO 17 (ESP32 TX2)
-PPS    ──────→   (Not connected)
-```
+| Component | Pin | ESP32-CAM Pin | Purpose |
+| :--- | :--- | :--- | :--- |
+| NEO-6M | VCC | 5V | Power supply |
+| NEO-6M | GND | GND | Common Ground |
+| NEO-6M | TX | GPIO 12/13/14* | UART Transmit to ESP32 Receive |
+| NEO-6M | RX | GPIO 15* | UART Receive from ESP32 Transmit (Optional, usually TX only is needed) |
 
-**Notes:**
-- GPS TX connects to ESP32 RX (data flows GPS → ESP32)
-- GPS RX connects to ESP32 TX (data flows ESP32 → GPS)
-- Some GPS modules need 5V, others work with 3.3V - check your module!
-- GPS needs **clear view of sky** for satellite lock
+*(Note: ESP32-CAM GPIO allocation is tight; specific software-serial or reassigned hardware UART pins must be verified against the SD card usage, typically avoiding GPIO 4, 12, 13, 14, 15 if SDMMC is used in 4-bit mode. If using 1-bit SD mode, these pins are freed up).*
 
-#### 4. I2C Pull-Up Resistors (REQUIRED)
-```
-              3.3V
-                │
-                ├──[ 4.7kΩ ]──→ GPIO 21 (SDA)
-                │
-                └──[ 4.7kΩ ]──→ GPIO 22 (SCL)
-```
+### DS3231 RTC Module Connections
 
-**Notes:**
-- I2C **requires** pull-up resistors
-- Use 4.7kΩ (or anywhere from 2.2kΩ to 10kΩ)
-- Connect to **3.3V**, not 5V
-- Some modules have built-in pull-ups, but adding external ones ensures reliable operation
+| Component | Pin | ESP32-CAM Pin | Purpose |
+| :--- | :--- | :--- | :--- |
+| DS3231 | VCC | 3.3V / 5V | Power supply |
+| DS3231 | GND | GND | Common Ground |
+| DS3231 | SDA | GPIO 21 | I2C Data line (Shared with MPU6050) |
+| DS3231 | SCL | GPIO 22 | I2C Clock line (Shared with MPU6050) |
 
 ---
 
-## Complete Wiring Diagram (Dual ESP32 Architecture)
+## 5. ESP32-CAM Pin Explanation
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    VEHICLE DASHBOARD                         │
-│                                                              │
-│  ┌──────────────────┐              ┌──────────────────┐     │
-│  │ ESP32-CAM        │              │ ESP32 DevKit     │     │
-│  │ Vision Node      │              │ Sensor Node      │     │
-│  │                  │              │                  │     │
-│  │ • OV2640 Camera  │              │ • MPU6050 (0x69) │     │
-│  │ • MJPEG Stream   │              │ • GPS NEO-6M     │     │
-│  │ • Port 81        │              │ • RTC DS3231     │     │
-│  │ • NO SENSORS     │              │ • Port 80        │     │
-│  └────────┬─────────┘              └────────┬─────────┘     │
-│           │                                 │               │
-│           │ WiFi                            │ WiFi          │
-│           └────────┬────────────────────────┘               │
-│                    │                                        │
-│           ┌────────▼────────┐                               │
-│           │  WiFi Router    │                               │
-│           │  (Hotspot)      │                               │
-│           └────────┬────────┘                               │
-│                    │                                        │
-│           ┌────────▼────────┐                               │
-│           │ Laptop/PC       │                               │
-│           │ Python Hub      │                               │
-│           │                 │                               │
-│           │ • YOLOv8        │                               │
-│           │ • SORT          │                               │
-│           │ • CSV Logger    │                               │
-│           └─────────────────┘                               │
-└─────────────────────────────────────────────────────────────┘
+The ESP32-CAM board severely limits accessible GPIO due to internal routing for the camera and SD card.
 
-ESP32-CAM Vision Node:
-┌─────────────────────┐
-│  5V Power (2A)      │
-└──────┬──────────────┘
-       │
-┌──────▼──────────────┐
-│  ESP32-CAM          │
-│  ┌──────────────┐   │
-│  │  OV2640      │   │
-│  │  Camera      │   │
-│  └──────────────┘   │
-│                     │
-│  WiFi: 192.168.x.x  │
-│  Port: 81           │
-└─────────────────────┘
-
-ESP32 Sensor Node:
-┌─────────────────────┐
-│  5V Power (1A)      │
-└──────┬──────────────┘
-       │
-┌──────▼──────────────────────────────┐
-│  ESP32 DevKit                       │
-│                                     │
-│  GPIO 21 (SDA) ●────┬───────┬──────┤
-│  GPIO 22 (SCL) ●────┼───┬───┼──────┤
-│  GPIO 16 (RX2) ●────┼───┼───┼──────┼──→ GPS TX
-│  GPIO 17 (TX2) ●────┼───┼───┼──────┼──→ GPS RX
-│  3.3V ●─────────────┼───┼───┼──────┼──┐
-│  GND ●──────────────┼───┼───┼──────┼──┼──→ Common GND
-└─────────────────────┼───┼───┼──────┼──┘
-                      │   │   │      │
-         ┌────────────┘   │   │      │
-         │                │   │      │
-    ┌────▼─────┐     ┌────▼───▼──┐  │
-    │ MPU6050  │     │ DS3231    │  │
-    │ (0x69)   │     │ RTC       │  │
-    │          │     │ (0x68)    │  │
-    │ AD0→3.3V │     │           │  │
-    └──────────┘     └───────────┘  │
-                                    │
-                          ┌─────────▼──┐
-                          │ GPS NEO-6M │
-                          │            │
-                          └────────────┘
-```
+* **Power Pins (5V, 3.3V, GND):** The board contains an internal LDO regulator. Supplying stable 5V is critical for the camera and SD card to function without brownouts. 3.3V can be tapped to power low-current logic sensors.
+* **Communication Pins (I2C):** GPIO 21 (SDA) and GPIO 22 (SCL) are mapped and shared as the sole I2C bus for both the RTC and Accelerometer. I2C allows multiple slave devices to exist on the same two wires by addressing them individually.
+* **Hardware UART Pins (U0RXD / GPIO 3, U0TXD / GPIO 1):** Primarily used for flashing/programming the ESP32 via an FTDI programmer and for debugging output. It is highly recommended to avoid attaching peripherals here during the boot phase.
+* **Software UART Pins (assigned for GPS):** Because the primary UART is for programming, a secondary software or reassigned hardware serial port must be created using available pins (e.g., GPIO 2 or GPIO 16, provided they do not conflict with the PSRAM or SD card).
+* **Camera Pins:** Internal pins (GPIO 32, 0, 5, 18, 19, 21, 36, 39, 34, 35, 25, 23, 22, 26, 27) are heavily multiplexed for the camera. Altering their state externally can crash the camera interface.
 
 ---
 
-## Testing Checklist
+## 6. Power Supply Design
 
-### Before Powering On:
+The PotHole Detection System operates in a high-draw, intermittent-spike environment (due to SD card writes and Wi-Fi bursts).
 
-**Vision Node (ESP32-CAM):**
-- [ ] Camera ribbon cable properly seated
-- [ ] 5V 2A power supply connected
-- [ ] No short circuits
-- [ ] WiFi credentials configured in firmware
-
-**Sensor Node (ESP32):**
-- [ ] All GND connections are common
-- [ ] Pull-up resistors installed (4.7kΩ on SDA and SCL to 3.3V)
-- [ ] **MPU6050 AD0 pin connected to 3.3V** (CRITICAL!)
-- [ ] GPS antenna has clear view of sky
-- [ ] RTC has CR2032 battery installed
-- [ ] 5V 1A power supply connected
-- [ ] WiFi credentials configured in firmware
-
-### After Powering On:
-
-**Vision Node:**
-- [ ] Serial Monitor shows "Vision Node Ready" (115200 baud)
-- [ ] WiFi connects and shows IP address
-- [ ] Camera initializes successfully
-- [ ] Watchdog timer initialized
-- [ ] Can access `http://[IP]:81/stream` in browser
-
-**Sensor Node:**
-- [ ] Serial Monitor shows "Sensor Node Ready" (115200 baud)
-- [ ] WiFi connects and shows IP address
-- [ ] MPU6050 detected at **0x69** (not 0x68!)
-- [ ] RTC detected at 0x68
-- [ ] GPS starts receiving data (may take 30-60 seconds)
-- [ ] Can access `http://[IP]/health` endpoint
-
-### Integration Test:
-- [ ] Both ESP32 devices on same WiFi network
-- [ ] Python script can connect to both endpoints
-- [ ] Video stream displays correctly
-- [ ] Sensor queries return valid JSON data
+* **Battery Type:** A high-quality Lithium-Ion (Li-ion) power bank or a strictly regulated 18650 2-cell configuration.
+* **Voltage Requirements:** The ESP32-CAM requires a rigid 5V input on its 5V pin. Dropping below 4.7V during a camera capture or SD write will cause an immediate brown-out reset (BOR).
+* **Power Consumption:** 
+    * Base MCU: ~100mA
+    * Camera Capture: spikes to ~250mA
+    * SD Card Write: spikes to ~200mA
+    * Continuous GPS Lock: ~50mA
+    * **Total Expected Peak Draw:** > 600mA. 
+* **Power Regulation:** A dedicated Buck/Boost converter or high-efficiency LDO (Low Dropout) regulator should be utilized between raw Li-Po batteries and the ESP module to ensure constant 5V delivery.
+* **Safe Power Practices:** Implement inline fuses. Avoid powering the ESP32-CAM continuously via the FTDI programmer's 3.3V line during deployment, as FTDI chips cannot supply the transient current needed for the camera/SD card. 
 
 ---
 
-## Troubleshooting
+## 7. Hardware Assembly
 
-### Vision Node Issues
+Follow these sequential steps to replicate the hardware setup:
 
-**Camera Not Working:**
-1. Check 5V power supply (needs 2A minimum)
-2. Verify camera ribbon cable is properly seated
-3. Check Serial Monitor for initialization errors
-4. Try different JPEG quality settings
-
-**Stream Not Accessible:**
-1. Verify WiFi connection (check Serial Monitor)
-2. Test URL in browser: `http://[IP]:81/stream`
-3. Check firewall settings
-4. Ensure 2.4GHz WiFi (ESP32 doesn't support 5GHz)
-
-### Sensor Node Issues
-
-**I2C Devices Not Found:**
-1. **Check pull-up resistors** - Most common issue!
-2. **Verify MPU6050 AD0 pin** - Must be connected to 3.3V
-3. Verify wiring - Especially SDA/SCL not swapped
-4. Test with I2C scanner code
-5. Check power - Ensure 3.3V is stable
-
-**MPU6050 Found at 0x68 (Wrong Address):**
-- **PROBLEM:** AD0 pin not connected to 3.3V
-- **SOLUTION:** Connect AD0 to 3.3V to change address to 0x69
-- **WARNING:** Will conflict with RTC if left at 0x68!
-
-**GPS Not Getting Fix:**
-1. Position GPS antenna near window or outdoors
-2. Wait 30-60 seconds for satellite lock (cold start)
-3. Check TX/RX not swapped - GPS TX → ESP32 GPIO 16
-4. Verify GPS module power (some need 5V, others 3.3V)
-
-**RTC Not Found:**
-1. Check I2C wiring (shared with MPU6050)
-2. Verify I2C address (0x68)
-3. Check CR2032 battery is installed
-4. Ensure pull-up resistors are present
-
-### WiFi Issues (Both Nodes)
-
-1. Verify SSID and password in code
-2. Check 2.4GHz WiFi (ESP32 doesn't support 5GHz)
-3. Move closer to router during testing
-4. Check Serial Monitor for connection status
+1. **Power Isolation:** Ensure all power sources are disconnected before wiring.
+2. **I2C Bus Setup:** Solder or jumper the MPU6050 and DS3231 SDA pins together, and connect them to GPIO 21 on the ESP32-CAM. Repeat for the SCL pins to GPIO 22. 
+3. **GPS Wiring:** Connect the NEO-6M TX pin to the designated RX pin on the ESP32-CAM (e.g., GPIO 12, depending on software configuration). Do not connect GPS TX to ESP32 RX (GPIO 3) while flashing code.
+4. **VCC/GND Distribution:** Create a common ground rail. Connect all GND pins from all modules to this rail. Create a 5V and a 3.3V rail. Connect the NEO-6M to 5V, and the MPU6050/DS3231 to their appropriate voltage levels (prefer 3.3V to match logic levels).
+5. **Camera Verification:** Gently snap the OV2640 camera ribbon cable into the ESP32-CAM's FPC connector, ensuring the black locking tab is pressed down firmly.
+6. **Programmer Connection:** For initial setup, connect the USB-to-TTL FTDI programmer. Connect FTDI TX to ESP32 RX (U0RXD), FTDI RX to ESP32 TX (U0TXD), GND to GND, and 5V to 5V. **Crucially, bridge GPIO 0 to GND** before powering on to enter Flash Mode.
+7. **Flashing and Run:** Flash the firmware, disconnect GPIO 0 from GND, and restart the board. Disconnect the FTDI and attach the main power bank for field deployment.
 
 ---
 
-## I2C Address Reference
+## 8. Hardware Installation on Vehicle
 
-| Device | Default Address | Modified Address | How to Change |
-|--------|----------------|------------------|---------------|
-| MPU6050 | 0x68 | **0x69** | Connect AD0 to 3.3V |
-| DS3231 | 0x68 | Cannot change | Fixed at 0x68 |
+Physical mounting directly dictates the quality of the sensor data.
 
-**This is why MPU6050's AD0 MUST be connected to 3.3V.**
-
----
-
-## Final Pin Summary
-
-### ESP32-CAM Vision Node
-```
-GPIO Pins Used:
-├─ GPIO 0,1,3,5,14,15,16 → RESERVED FOR CAMERA (do not use!)
-└─ All other pins → Available but unused
-
-Power:
-├─ 5V  → ESP32-CAM + Camera
-└─ GND → Common ground
-
-Network:
-└─ WiFi → Port 81 (MJPEG stream)
-```
-
-### ESP32 Sensor Node
-```
-GPIO Pins Used:
-├─ GPIO 21 → I2C SDA (MPU6050 + RTC)
-├─ GPIO 22 → I2C SCL (MPU6050 + RTC)
-├─ GPIO 16 → GPS RX (receives from GPS TX)
-└─ GPIO 17 → GPS TX (sends to GPS RX)
-
-Power Distribution:
-├─ 5V    → ESP32, RTC, GPS
-├─ 3.3V  → MPU6050, Pull-up resistors
-└─ GND   → Common ground for ALL modules
-
-I2C Addresses:
-├─ MPU6050 → 0x69 (AD0 = HIGH)
-└─ DS3231  → 0x68 (fixed)
-
-Network:
-└─ WiFi → Port 80 (sensor queries)
-```
+* **Sensor Placement (MPU6050):** The MPU6050 (or the entire rigid enclosure containing it) must be rigidly attached to the vehicle chassis or a non-dampened structural component. If mounted loosely or on thick foam, the acceleration spikes from potholes will be absorbed, leading to false negatives. Ensure the Z-axis of the sensor is perfectly aligned with the Earth's gravity vector.
+* **Camera Placement (ESP32-CAM):** Mount the camera behind the windshield, on the dashboard, or securely on the vehicle's exterior grille. Ensure an unobstructed field of view of the immediate road surface ahead (approximately 3 to 10 meters in front of the vehicle). The enclosure must have a clear acrylic or glass window.
+* **GPS Antenna Placement:** The NEO-6M ceramic patch antenna requires a clear line of sight to the sky. Dashboard mounting near the windshield is optimal. Metallic enclosures will block GPS signals.
+* **Vibration Isolation:** While the MPU6050 needs structural coupling, the camera and SD card slot require minor vibration damping (e.g., thin rubber washers) to prevent optical blur (jello effect) and mechanical disconnection of the SD card contacts under heavy shock.
 
 ---
 
-## Important Notes
+## 9. Hardware Working Principle
 
-### Dual ESP32 Benefits:
-- **Separation of Concerns:** Camera and sensors on different devices
-- **No GPIO Conflicts:** ESP32-CAM's limited pins only used for camera
-- **Event-Driven Sensors:** 95% power savings vs continuous streaming
-- **Independent Failure:** If one node fails, other continues working
+The hardware synchronizes inputs to classify road conditions.
 
-### Power Recommendations:
-- **Vision Node:** Use dedicated 5V 2A power supply (camera draws significant current)
-- **Sensor Node:** 5V 1A sufficient (sensors use minimal power)
-- **Avoid USB Power:** May not provide stable current for camera
-
-### WiFi Configuration:
-- Both nodes must connect to **same WiFi network**
-- Python hub must be on **same network**
-- Use **2.4GHz WiFi** (ESP32 doesn't support 5GHz)
+1. **Continuous Monitoring:** The MPU6050 continuously reads spatial acceleration at up to 1000Hz. The ESP32 evaluates this data against a preset Z-axis threshold (e.g., > 1.5g or < 0.5g).
+2. **Event Trigger:** If a vehicle hits a pothole, the tire drops and impacts, causing a sharp vertical acceleration spike. The ESP32 registers this as a trigger event.
+3. **Location & Time Association:** Immediately upon trigger, the ESP32 halts polling, queries the DS3231 for exact time, and reads the latest valid NMEA sentence buffered from the NEO-6M GPS.
+4. **Visual Capture:** The ESP32 triggers the OV2640 camera to capture a JPEG frame. 
+5. **Data Storage:** The microcontroller writes a combined payload—the image file and a corresponding text/JSON log entry (Time, Lat, Long, G-Force)—to the MicroSD memory. The system then resets the trigger state and resumes monitoring.
 
 ---
 
-## Success Indicators
+## 10. Hardware Challenges
 
-### Vision Node Serial Output:
-```
-========================================
-ESP32-CAM VISION NODE
-Dual ESP32 Architecture v2.0
-========================================
+Engineers building this system will face several physical challenges:
 
-Initializing watchdog timer (30s)... OK
-Initializing OV2640 camera... SUCCESS
-Connecting to WiFi... CONNECTED
-IP Address: 192.168.x.x
-Starting stream server on port 81... SUCCESS
-
-========================================
-VISION NODE READY
-========================================
-Endpoints:
-  MJPEG Stream: http://192.168.x.x:81/stream
-  Health Check: http://192.168.x.x:81/health
-========================================
-```
-
-### Sensor Node Serial Output:
-```
-========================================
-ESP32 SENSOR NODE
-Dual ESP32 Architecture v2.0
-========================================
-
-I2C initialized on GPIO21 (SDA) & GPIO22 (SCL)
-Initializing MPU6050... FOUND at 0x69 (AD0=HIGH, no conflict with RTC)
-  Range: ±8g
-  Filter: 21 Hz
-Initializing NEO-6M GPS... OK (GPIO16/GPIO17)
-Initializing DS3231 RTC... FOUND
-Connecting to WiFi... CONNECTED
-IP Address: 192.168.x.x
-
-========================================
-SENSOR NODE READY
-========================================
-Endpoints:
-  Sensor Query: http://192.168.x.x/query?pothole_id=<ID>
-  Health Check: http://192.168.x.x/health
-========================================
-Sensors: MPU=OK GPS=OK RTC=OK
-========================================
-```
+* **Sensor Noise:** Engine vibrations and standard road texture introduce significant noise into the MPU6050 data. Hardware low-pass filtering (via DMP) and mechanical mounting optimization are strictly required.
+* **Vehicle Vibrations (Camera):** The "rolling shutter" effect of the OV2640 CMOS sensor paired with vehicle vibration can cause severe image distortion, rendering visual pothole classification difficult.
+* **Power Stability:** Automotive power systems (if tapping into the 12V vehicle battery) are extremely noisy, experiencing voltage spikes and drops (e.g., alternator whine, starter motor cranking). Robust automotive-grade buck converters isolated with bulk capacitors are mandatory.
+* **Weather Conditions:** If mounted externally, the enclosure must be strictly IP67 rated. The OV2640 lens must remain clear of water, mud, and dust.
 
 ---
 
-**Created for Dual ESP32 Pothole Detection System**  
-*Last Updated: 2026-02-10*  
-*Architecture: v2.0 (Dual ESP32)*
+## 11. Hardware Limitations
+
+* **Processing Bottleneck:** The ESP32 is highly capable for a microcontroller, but it lacks the RAM and vector processing units to perform deep-learning-based, real-time visual classification (CNNs) at high framerates onboard.
+* **Camera Dynamic Range:** The OV2640 suffers in low light and has poor dynamic range, making pothole detection in shadows or at night relying purely on the camera highly ineffective.
+* **GPS Drift:** Standard civilian GPS (NEO-6M) has an error margin of typically 2.5 meters to 5 meters. This makes pinpointing a specific lane or a small pothole's absolute location imprecise without RTK correction.
+* **SD Card Corruption:** Abrupt power loss while the ESP32 is writing to the SD card can lead to total file system corruption.
+
+---
+
+## 12. Future Hardware Improvements
+
+As the system scales, the following embedded iterations should be considered:
+
+* **Better Sensors:** Replacing the MPU6050 with an automotive-grade industrial IMU (e.g., Bosch BMI series) for lower noise floors and higher precision. Adding a LiDAR or Ultrasonic distance array for absolute depth measurement of the pothole.
+* **Edge AI Hardware:** Migrating from the ESP32-CAM to a dedicated Edge AI SBC like the Raspberry Pi 4, NVIDIA Jetson Nano, or Coral Dev Board. This would allow for parallel CNN execution directly on the video feed.
+* **Improved Mounting Design:** Utilizing 3D-printed, aerodynamic, ASA/PETG enclosures with active cooling (if needed for Edge AI) and an integrated wiper or hydrophobic glass for the camera lens.
+* **Telemetry Upgrade:** Integrating an LTE/4G module (e.g., SIM800L or similar modern cellular modems) to stream coordinate data and images to a cloud infrastructure in real-time instantly, rather than relying on batch SD card extraction.

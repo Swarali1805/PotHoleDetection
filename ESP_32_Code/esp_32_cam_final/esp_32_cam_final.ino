@@ -9,8 +9,8 @@
 #include "camera_pins.h"   // <-- separate pin file
 
 /* ================= WIFI CONFIGURATION ================= */
-const char* ssid = "Eshwari K";      // exact hotspot name
-const char* password = "Eshwari1120";  // new password
+// [USER ACTION REQUIRED]: Edit the .env file in the root folder and run python update_wifi.py
+#include "credentials.h"
 
 /* ================= STREAM CONFIGURATION ================= */
 #define PART_BOUNDARY "123456789000000000000987654321"
